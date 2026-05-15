@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cardiology Fellowship Shift Manager</title>
+
+  <!-- Inter font (optional, falls back gracefully if CDN blocked) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Decorative starfield (pure CSS, in style.css) -->
+  <div class="starfield"></div>
+
+  <!-- ============================================================ -->
+  <!-- LOGIN SCREEN                                                  -->
+  <!-- Visible when no session exists. Hidden once logged in.        -->
+  <!-- ============================================================ -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <h1 class="login-title">Cardiology Fellowship<br>Shift Manager</h1>
+      <p class="login-subtitle">Jul 2026 – Jun 2027</p>
+
+      <form id="loginForm" class="login-form" autocomplete="off">
+        <input
+          type="password"
+          id="loginCode"
+          class="login-input"
+          placeholder="Enter your code"
+          autocomplete="off"
+          required
+          inputmode="numeric"
+        >
+        <button type="submit" id="loginBtn" class="login-btn">Enter</button>
+      </form>
+
+      <div id="loginError" class="login-error" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MAIN APP                                                      -->
+  <!-- Hidden until login succeeds. Shown via JS by removing 'hidden'-->
+  <!-- ============================================================ -->
+  <div id="mainApp" class="main-app hidden">
+
+    <!-- Top navigation bar -->
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="brand-icon">✦</span>
+        <span class="brand-text">Shift Manager</span>
+      </div>
+
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="sheet1">Avoid Requests</button>
+        <button class="tab-btn" data-tab="sheet2">Shift Manager</button>
+      </nav>
+
+      <div class="topbar-user">
+        <span class="user-chip" id="userChip">
+          <span class="user-color-dot" id="userColorDot"></span>
+          <span id="userName">—</span>
+          <span class="user-role" id="userRole">—</span>
+        </span>
+        <button id="logoutBtn" class="logout-btn">Logout</button>
+      </div>
+    </header>
+
+    <!-- Month selector (shared across both sheets) -->
+    <div class="month-bar" id="monthBar">
+      <!-- 12 buttons injected by JS -->
+    </div>
+
+    <!-- Sheet containers -->
+    <main class="sheet-area">
+      <section id="sheet1" class="sheet active">
+        <!-- Filled by sheet1.js -->
+      </section>
+
+      <section id="sheet2" class="sheet">
+        <!-- Filled by sheet2.js -->
+      </section>
+    </main>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Toast container (notifications)                               -->
+  <!-- ============================================================ -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- ============================================================ -->
+  <!-- Modal container (holiday add, premier confirm, etc.)          -->
+  <!-- ============================================================ -->
+  <div id="modalContainer" class="modal-container hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card" id="modalCard">
+      <!-- Filled dynamically -->
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- App bootstrap script                                          -->
+  <!-- ============================================================ -->
+  <script type="module">
+    import { login, logout, currentSession, patchSession } from "./js/auth.js";
+    import { fetchAllFellows } from "./js/firestore-api.js";
+    import { fellowshipMonths, monthLabel } from "./js/utils.js";
+    import { initSheet1 } from "./js/sheet1.js";
+    import { initSheet2 } from "./js/sheet2.js";
+
+    // ----------------------------------------------------------------
+    // App-wide state, exposed to sheet modules via init args
+    // ----------------------------------------------------------------
+    const state = {
+      fellows: [],          // [{ fellowNumber, name, color }, ...]
+      fellowsByNum: {},     // { 1: {...}, 2: {...}, ... } for O(1) lookup
+      currentMonth: "2026-07",
+      session: null,
+    };
+
+    // ----------------------------------------------------------------
+    // Toast helper — exported via window for sheets to call
+    // ----------------------------------------------------------------
+    window.showToast = function(message, type = "info", durationMs = 3000) {
+      const container = document.getElementById("toastContainer");
+      const toast = document.createElement("div");
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      // Force reflow then add 'show' for transition
+      requestAnimationFrame(() => toast.classList.add("show"));
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 300);
+      }, durationMs);
+    };
+
+    // ----------------------------------------------------------------
+    // Modal helper
+    // ----------------------------------------------------------------
+    window.openModal = function(innerHtml) {
+      const container = document.getElementById("modalContainer");
+      const card = document.getElementById("modalCard");
+      card.innerHTML = innerHtml;
+      container.classList.remove("hidden");
+    };
+    window.closeModal = function() {
+      document.getElementById("modalContainer").classList.add("hidden");
+      document.getElementById("modalCard").innerHTML = "";
+    };
+    // Click outside the card closes the modal
+    document.getElementById("modalContainer").addEventListener("click", (e) => {
+      if (e.target.classList.contains("modal-backdrop")) window.closeModal();
+    });
+
+    // ----------------------------------------------------------------
+    // Login handling
+    // ----------------------------------------------------------------
+    const loginForm = document.getElementById("loginForm");
+    const loginInput = document.getElementById("loginCode");
+    const loginError = document.getElementById("loginError");
+    const loginCard = document.querySelector(".login-card");
+
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.textContent = "";
+      const code = loginInput.value;
+      const result = await login(code);
+      if (!result.success) {
+        loginError.textContent = result.error;
+        loginCard.classList.remove("shake");
+        // Force reflow to restart animation
+        void loginCard.offsetWidth;
+        loginCard.classList.add("shake");
+        return;
+      }
+      await bootApp();
+    });
+
+    // ----------------------------------------------------------------
+    // Boot main app after successful login
+    // ----------------------------------------------------------------
+    async function bootApp() {
+      // Fetch fellows (used everywhere)
+      try {
+        state.fellows = await fetchAllFellows();
+      } catch (err) {
+        console.error("Failed to fetch fellows:", err);
+        window.showToast("Failed to load fellow data. Try logging in again.", "error", 5000);
+        return;
+      }
+
+      state.fellowsByNum = {};
+      for (const f of state.fellows) state.fellowsByNum[f.fellowNumber] = f;
+
+      // Attach color to session for convenience
+      const sess = currentSession();
+      const myFellow = state.fellowsByNum[sess.fellowNumber];
+      patchSession({ color: myFellow?.color || "#888" });
+      state.session = currentSession();
+
+      // Render user chip in topbar
+      document.getElementById("userName").textContent = state.session.name;
+      document.getElementById("userRole").textContent =
+        state.session.role === "master" ? "Master" : "User";
+      document.getElementById("userColorDot").style.background = state.session.color;
+
+      // Build month selector
+      const monthBar = document.getElementById("monthBar");
+      monthBar.innerHTML = "";
+      for (const mk of fellowshipMonths()) {
+        const btn = document.createElement("button");
+        btn.className = "month-btn";
+        btn.dataset.month = mk;
+        btn.textContent = monthLabel(mk);
+        if (mk === state.currentMonth) btn.classList.add("active");
+        btn.addEventListener("click", () => switchMonth(mk));
+        monthBar.appendChild(btn);
+      }
+
+      // Hide login, show app
+      document.getElementById("loginScreen").classList.add("hidden");
+      document.getElementById("mainApp").classList.remove("hidden");
+
+      // Init both sheets (they manage their own internal rendering)
+      initSheet1({
+        state,
+        getCurrentMonth: () => state.currentMonth,
+      });
+      initSheet2({
+        state,
+        getCurrentMonth: () => state.currentMonth,
+      });
+
+      // Render initial active sheet
+      renderCurrentSheet();
+    }
+
+    // ----------------------------------------------------------------
+    // Tab switching
+    // ----------------------------------------------------------------
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".sheet").forEach(s => s.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+        renderCurrentSheet();
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // Month switching (notifies whichever sheet is active)
+    // ----------------------------------------------------------------
+    function switchMonth(monthKey) {
+      if (monthKey === state.currentMonth) return;
+      // If Sheet 2 has unsaved pending changes, block the switch and toast.
+      if (typeof window.sheet2HasPendingChanges === "function"
+          && window.sheet2HasPendingChanges()) {
+        window.showToast("Save or discard pending changes before switching months.", "error", 3500);
+        return;
+      }
+      state.currentMonth = monthKey;
+      document.querySelectorAll(".month-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.month === monthKey);
+      });
+      renderCurrentSheet();
+    }
+
+    function renderCurrentSheet() {
+      const active = document.querySelector(".sheet.active");
+      if (!active) return;
+      // Dispatch a custom event the sheet modules listen for.
+      active.dispatchEvent(new CustomEvent("sheet:render", {
+        detail: { monthKey: state.currentMonth }
+      }));
+    }
+
+    // ----------------------------------------------------------------
+    // Logout
+    // ----------------------------------------------------------------
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await logout();
+    });
+
+    // ----------------------------------------------------------------
+    // Auto-boot if session already exists (e.g., reload during session)
+    // ----------------------------------------------------------------
+    if (currentSession()) {
+      bootApp();
+    }
+  </script>
+</body>
+</html>

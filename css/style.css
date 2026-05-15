@@ -1,0 +1,886 @@
+/* css/style.css
+   Dark space theme for the Shift Manager.
+   Organized by section: tokens → reset → starfield → login → app shell
+   → month bar → sheet1 → sheet2 → modal → toast → utilities.
+*/
+
+/* =============================================================================
+   Design tokens (CSS variables)
+   ============================================================================= */
+:root {
+  --bg:            #0B0F1A;
+  --surface:       #161B2E;
+  --surface-2:     #1E2440;
+  --border:        #2A3050;
+  --text:          #E8ECF7;
+  --text-dim:      #9098B4;
+  --text-faint:    #5A6080;
+  --accent:        #7B61FF;
+  --accent-dim:    #5B47CC;
+  --success:       #10B981;
+  --warning:       #F59E0B;
+  --danger:        #EF4444;
+  --weekend-bg:    #2A3050;
+  --holiday-bg:    #3D2A52;
+  --yellow-tint:   #5C4A1A;
+
+  --radius:        8px;
+  --radius-sm:     4px;
+  --shadow-card:   0 4px 24px rgba(0,0,0,0.4);
+  --shadow-soft:   0 2px 8px rgba(0,0,0,0.3);
+
+  --font-sans:     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   Roboto, Oxygen, Ubuntu, sans-serif;
+  --font-mono:     ui-monospace, "SF Mono", Monaco, Consolas, monospace;
+}
+
+/* =============================================================================
+   Reset & base
+   ============================================================================= */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+input, select {
+  font-family: inherit;
+  font-size: inherit;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  outline: none;
+}
+input:focus, select:focus { border-color: var(--accent); }
+
+.hidden { display: none !important; }
+
+/* =============================================================================
+   Starfield (decorative background)
+   Pure CSS radial-gradient dots layered on the body.
+   ============================================================================= */
+.starfield {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%,  #ffffff44 1px, transparent 1px),
+    radial-gradient(1px 1px at 70% 80%,  #ffffff33 1px, transparent 1px),
+    radial-gradient(1px 1px at 40% 60%,  #ffffff22 1px, transparent 1px),
+    radial-gradient(2px 2px at 85% 15%,  #7B61FF55 1px, transparent 2px),
+    radial-gradient(1px 1px at 10% 85%,  #ffffff22 1px, transparent 1px),
+    radial-gradient(1px 1px at 55% 25%,  #ffffff33 1px, transparent 1px),
+    radial-gradient(1.5px 1.5px at 90% 60%, #7B61FF44 1px, transparent 2px),
+    radial-gradient(1px 1px at 30% 90%,  #ffffff22 1px, transparent 1px);
+  background-size: 800px 800px;
+  background-repeat: repeat;
+  opacity: 0.6;
+}
+
+/* =============================================================================
+   Login screen
+   ============================================================================= */
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 48px 40px;
+  max-width: 400px;
+  width: 100%;
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+.login-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.login-subtitle {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 32px;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-input {
+  font-size: 18px;
+  text-align: center;
+  letter-spacing: 4px;
+  padding: 14px;
+}
+.login-btn {
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+.login-btn:hover { background: var(--accent-dim); }
+.login-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 12px;
+  min-height: 18px;
+}
+
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  20%,60% { transform: translateX(-8px); }
+  40%,80% { transform: translateX(8px); }
+}
+.shake { animation: shake 0.4s; }
+
+/* =============================================================================
+   App shell — topbar
+   ============================================================================= */
+.main-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 16px;
+}
+.brand-icon { color: var(--accent); font-size: 18px; }
+
+.tabs { display: flex; gap: 4px; }
+.tab-btn {
+  padding: 8px 16px;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  transition: all 0.15s;
+}
+.tab-btn:hover { background: var(--surface-2); color: var(--text); }
+.tab-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+.topbar-user { display: flex; align-items: center; gap: 12px; }
+.user-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface-2);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+}
+.user-color-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.user-role {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.logout-btn {
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+}
+.logout-btn:hover { color: var(--danger); background: var(--surface-2); }
+
+/* =============================================================================
+   Month bar
+   ============================================================================= */
+.month-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.month-btn {
+  padding: 6px 14px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+.month-btn:hover { background: var(--border); color: var(--text); }
+.month-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* =============================================================================
+   Sheet area
+   ============================================================================= */
+.sheet-area {
+  flex: 1;
+  padding: 24px;
+}
+.sheet { display: none; }
+.sheet.active { display: block; }
+
+/* =============================================================================
+   Sheet 1 — Avoid Requests
+   ============================================================================= */
+.sheet1-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.allow-toggle {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.allow-toggle.on { background: var(--success); color: white; }
+.allow-toggle.off { background: var(--border); color: var(--text-dim); }
+.add-holiday-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+  font-weight: 500;
+  font-size: 13px;
+}
+.add-holiday-btn:hover { background: var(--accent-dim); }
+
+.sheet1-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sheet1-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+/* Calendar */
+.calendar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.calendar-weekday {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 6px 0;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cal-cell {
+  aspect-ratio: 1;
+  background: var(--surface-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.1s;
+  min-height: 60px;
+}
+.cal-cell:hover:not(.disabled):not(.readonly) {
+  background: var(--border);
+}
+.cal-cell.empty {
+  visibility: hidden;
+}
+.cal-cell.weekend { background: var(--weekend-bg); }
+.cal-cell.holiday { background: var(--holiday-bg); }
+.cal-cell.disabled,
+.cal-cell.readonly {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.cal-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.cal-holiday-icon {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.cal-checkmark {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 14px;
+  color: white;
+  font-weight: 700;
+}
+.cal-fellow-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: auto;
+}
+.cal-fellow-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Holiday list panel */
+.holiday-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.holiday-panel h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.holiday-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.holiday-row:last-child { border-bottom: none; }
+.holiday-row .h-date {
+  color: var(--accent);
+  font-weight: 600;
+  width: 56px;
+  flex-shrink: 0;
+}
+.holiday-row .h-name { flex: 1; }
+.holiday-row .h-delete {
+  color: var(--danger);
+  font-size: 16px;
+  padding: 0 6px;
+}
+.holiday-row .h-delete:hover { color: #ff7676; }
+.holiday-row.custom .h-name::after {
+  content: " ✦";
+  color: var(--accent);
+  font-size: 10px;
+}
+
+/* Avoid summary */
+.avoid-summary {
+  margin-top: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.avoid-summary h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.date-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.date-chip {
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border-radius: 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.date-chip:hover { background: var(--danger); color: white; }
+.date-chip .x { font-size: 14px; color: var(--text-dim); }
+.date-chip:hover .x { color: white; }
+.empty-state {
+  color: var(--text-faint);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Master view: avoid table */
+.avoid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.avoid-table th, .avoid-table td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.avoid-table th {
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.fellow-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+
+.month-footer-stats {
+  margin-top: 16px;
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.month-footer-stats strong { color: var(--text); }
+
+/* =============================================================================
+   Sheet 2 — Shift Manager (calendar-based, pending-changes overlay)
+   ============================================================================= */
+
+/* ---- Premier / status (used in toolbar) ---- */
+.premier-btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  transition: all 0.15s;
+}
+.premier-btn.green { background: var(--success); color: white; }
+.premier-btn.green:hover:not(:disabled) { background: #0e9b6f; }
+.premier-btn.amber { background: var(--warning); color: #1a1300; }
+.premier-btn.amber:hover:not(:disabled) { background: #d98708; }
+.premier-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.premier-status {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.premier-status strong { color: var(--text); }
+
+.please-wait {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: center;
+  padding: 80px 20px;
+  letter-spacing: 2px;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ---- Toolbar (top of Sheet 2) ---- */
+.s2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.pending-status {
+  font-size: 12px;
+  color: var(--warning);
+  margin-right: auto;        /* pushes the buttons to the right */
+}
+.pending-status.saved { color: var(--text-faint); }
+.pending-status strong { color: var(--warning); font-weight: 700; }
+
+.save-btn,
+.discard-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s, opacity 0.15s;
+}
+.save-btn { background: var(--accent); color: white; }
+.save-btn:hover:not(:disabled) { background: var(--accent-dim); }
+.discard-btn { background: var(--surface-2); color: var(--text); }
+.discard-btn:hover:not(:disabled) { background: var(--border); }
+.save-btn:disabled,
+.discard-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- Main grid: counts on the left, calendar on the right ---- */
+.s2-main {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* ---- Shift count panel (reused from old layout) ---- */
+.count-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  position: sticky;
+  top: 12px;       /* sticks when calendar scrolls */
+}
+.count-panel h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.count-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.count-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.count-table .col-wd { text-align: right; color: var(--text-dim); }
+.count-table .col-wh { text-align: right; color: var(--warning); font-weight: 600; }
+.count-divider { height: 12px; }
+
+/* ---- Calendar (cal2) ---- */
+.s2-calendar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.cal2-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.cal2-weekday {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cal2-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  /* Uniform row height — every cell in the calendar is exactly this tall,
+     so rows don't snap to the tallest cell (which made cells with holiday
+     names + avoid dots stretch the whole row taller than empty-content rows).
+     Sized to comfortably fit: day-num row (~16px) + dots row (~14px)
+     + select (~28px) + padding (12px) + gaps (8px) ≈ 78px content, 100px gives breathing room. */
+  grid-auto-rows: 100px;
+  gap: 4px;
+}
+
+/* Day cell */
+.cal2-cell {
+  background: var(--surface-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  /* No min-height — grid-auto-rows on the grid container drives the height
+     so every cell is identical. align-self defaults to stretch in grid,
+     so cells fill the full 100px row. */
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background 0.15s, border-color 0.15s;
+  position: relative;
+  overflow: hidden;            /* defensive: if content is somehow too tall, clip rather than expand */
+}
+.cal2-cell.pad {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Weekend or holiday → dark mustard. Single shared color so weekends and
+   holidays look identical (both are "non-working" — the distinction matters
+   for counting, not for visual emphasis). */
+.cal2-cell.non-working {
+  background: #4A3D1F;
+}
+
+/* Pending unsaved edit: dashed purple border. */
+.cal2-cell.pending {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+/* Validation error: solid red border, overrides pending. */
+.cal2-cell.invalid {
+  border-color: var(--danger);
+  border-style: solid;
+}
+
+/* Cell head: day number + holiday name. */
+.cal2-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+}
+.cal2-day-num {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 18px;
+}
+.cal2-hol {
+  font-size: 10px;
+  color: #F0D58A;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+/* Avoid markers row (dots with fellow numbers). */
+.cal2-dots {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  min-height: 14px;
+}
+.cal2-dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* The dropdown — fills the rest of the cell. */
+.cal2-pick {
+  margin-top: auto;
+}
+.cal2-select {
+  width: 100%;
+  padding: 5px 6px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.cal2-select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Static chip used when readonly (premiered / user view). */
+.cal2-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  width: 100%;
+  text-align: center;
+}
+.cal2-chip.empty {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-faint);
+}
+
+/* =============================================================================
+   Modal
+   ============================================================================= */
+.modal-container {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+}
+.modal-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 480px;
+  width: calc(100% - 40px);
+  box-shadow: var(--shadow-card);
+}
+.modal-card h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  color: var(--text);
+}
+.modal-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.modal-row label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.modal-row input,
+.modal-row select {
+  width: 100%;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent-dim); }
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+}
+.btn-secondary:hover { background: var(--border); }
+.btn-danger {
+  background: var(--danger);
+  color: white;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+/* =============================================================================
+   Toast
+   ============================================================================= */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  box-shadow: var(--shadow-card);
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.25s, transform 0.25s;
+  max-width: 360px;
+  pointer-events: auto;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+.toast-success { border-left-color: var(--success); }
+.toast-error   { border-left-color: var(--danger); }
+.toast-warning { border-left-color: var(--warning); }
+
+/* =============================================================================
+   Responsive (basic)
+   ============================================================================= */
+@media (max-width: 1100px) {
+  .s2-main { grid-template-columns: 1fr; }
+  .count-panel { position: static; }
+  .sheet1-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .cal2-grid { grid-auto-rows: 84px; }
+  .cal2-cell { padding: 4px; }
+  .cal2-day-num { font-size: 12px; }
+  .cal2-hol { font-size: 9px; }
+  .cal2-select { font-size: 11px; padding: 4px; }
+}
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; gap: 12px; }
+  .tabs { order: 3; width: 100%; justify-content: center; }
+  .sheet-area { padding: 12px; }
+  .month-bar { padding: 8px 12px; }
+}

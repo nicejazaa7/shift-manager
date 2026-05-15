@@ -1,0 +1,28 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Node (in case you ever add tooling later)
+node_modules/
+package-lock.json
+
+# Env files — never commit secrets
+.env
+.env.local
+*.key.json
+serviceAccount*.json
+
+# Firebase local emulator artifacts
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Disabled / archived files (kept locally, never published)
+*.disabled
+
+# Context-restore notes for Claude (contain auth codes — never push)
+NEXT_CHAT_CONTEXT.md
+*_CONTEXT.md

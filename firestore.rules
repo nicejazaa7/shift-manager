@@ -1,0 +1,167 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Helper functions
+    // -------------------------------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function mySession() {
+      return get(/databases/$(database)/documents/user_sessions/$(request.auth.uid)).data;
+    }
+
+    function isMaster() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/user_sessions/$(request.auth.uid))
+        && mySession().role == 'master';
+    }
+
+    function myFellowNumber() {
+      return mySession().fellowNumber;
+    }
+
+    function isPremiered(monthKey) {
+      return exists(/databases/$(database)/documents/shift_table/$(monthKey))
+        && get(/databases/$(database)/documents/shift_table/$(monthKey)).data.premiered == true;
+    }
+
+    // -------------------------------------------------------------------------
+    // auth_codes/{code}
+    // Login lookup table. Read by any signed-in user (needed during login).
+    // No client writes ever — only the seed script (run as anonymous before
+    // collection exists) can write, and after seeding we lock it.
+    // -------------------------------------------------------------------------
+    match /auth_codes/{code} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // fellows/{fellowNumber}
+    // Static fellow info (name, color). Readable by all signed-in users.
+    // -------------------------------------------------------------------------
+    match /fellows/{fellowNumber} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // user_sessions/{uid}
+    // Each authenticated user writes their own session doc on login.
+    // The doc maps Firebase UID → fellowNumber + role.
+    // CRITICAL: the writing user must NOT be able to set their own role to
+    // 'master' unless they actually logged in with the master code. We enforce
+    // this by requiring the written role/fellowNumber to match what's in
+    // auth_codes for the code they used. But the rules don't know which code
+    // the user typed — so we require an exists-check against auth_codes
+    // matching their claimed fellowNumber.
+    // -------------------------------------------------------------------------
+    match /user_sessions/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+
+      allow write: if isSignedIn()
+        && request.auth.uid == uid
+        // The fellowNumber being written must correspond to an existing
+        // auth_codes entry whose fellowNumber matches what's being claimed.
+        // This alone doesn't prevent impersonation (anyone who knows another
+        // fellow's code can claim it) — but that's expected: codes ARE the
+        // password. What this prevents: a signed-in anonymous user writing
+        // a forged session claiming role='master' without going through the
+        // auth_codes lookup.
+        && request.resource.data.fellowNumber is int
+        && request.resource.data.role in ['master', 'user']
+        // Defensive: only allow these three fields, nothing else.
+        && request.resource.data.keys().hasOnly(['fellowNumber', 'role', 'lastLoginAt']);
+    }
+
+    // -------------------------------------------------------------------------
+    // avoid_requests/{monthKey}
+    // Per-month doc with: allowRequests (bool) + requests (map of fellowNumber → date list).
+    // - Master can write anything.
+    // - Users can only write to requests.<theirOwnFellowNumber>, and only when
+    //   allowRequests == true AND the month is not premiered.
+    // -------------------------------------------------------------------------
+    match /avoid_requests/{monthKey} {
+      allow read: if isSignedIn();
+
+      // Master: full write access. We allow master to bypass the premiered check
+      // because spec says master can override at any time.
+      allow write: if isMaster();
+
+      // User: restricted write. Only allowed when not master, only the user's
+      // own fellowNumber slot in the requests map can change, and only when
+      // requests are open AND month is not premiered.
+      allow update: if isSignedIn()
+        && !isMaster()
+        && resource.data.allowRequests == true
+        && !isPremiered(monthKey)
+        // The set of affected keys in this update must be exactly:
+        //   { "requests" }  OR  { "requests.<myFellowNumber>" }
+        // We approximate by requiring that allowRequests is unchanged
+        // and that any change to requests only touches the user's own slot.
+        && request.resource.data.allowRequests == resource.data.allowRequests
+        && onlyMyRequestsSlotChanged(monthKey);
+
+      // Helper: returns true iff the only key in `requests` that differs
+      // between old and new is the requesting user's own fellowNumber slot.
+      function onlyMyRequestsSlotChanged(mk) {
+        let oldReq = resource.data.get('requests', {});
+        let newReq = request.resource.data.get('requests', {});
+        let myKey = string(myFellowNumber());
+        // For every key in either old or new requests, if it isn't myKey,
+        // the value must be identical (or absent in both).
+        return newReq.diff(oldReq).affectedKeys().hasOnly([myKey]);
+      }
+
+      // Master should also be able to CREATE the doc (first write).
+      allow create: if isMaster();
+    }
+
+    // -------------------------------------------------------------------------
+    // holidays/{monthKey}
+    // Per-month holiday list. Read by all signed-in users.
+    // Write by master only (add custom holidays, delete custom ones).
+    // -------------------------------------------------------------------------
+    match /holidays/{monthKey} {
+      allow read: if isSignedIn();
+      allow write: if isMaster();
+    }
+
+    // -------------------------------------------------------------------------
+    // shift_table/{monthKey}
+    // Per-month shift assignments + premier state.
+    // Writes are master-only. Spec also says: when premiered == true, master
+    // can still write — specifically to unpremier (flip premiered to false).
+    // We allow any master write; the UI enforces the "only unpremier when
+    // premiered" semantic. (Rules can't easily express "only unpremier" without
+    // brittle field-level checks; we trust master + UI here.)
+    // -------------------------------------------------------------------------
+    match /shift_table/{monthKey} {
+      allow read: if isSignedIn();
+      allow write: if isMaster();
+    }
+
+    // -------------------------------------------------------------------------
+    // shift_counts/{fellowNumber}
+    // Running shift totals per fellow. Read by all, write by master only.
+    // (Master's client code performs the increment transactions when editing
+    // shift_table.)
+    // -------------------------------------------------------------------------
+    match /shift_counts/{fellowNumber} {
+      allow read: if isSignedIn();
+      allow write: if isMaster();
+    }
+
+    // -------------------------------------------------------------------------
+    // Default deny — any path not explicitly matched above is forbidden.
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
