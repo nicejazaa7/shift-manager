@@ -46,7 +46,9 @@ html, body {
   font-size: 14px;
   line-height: 1.5;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* overflow-x: hidden removed — iOS Safari suppresses touch-scroll on ALL
+     children when this is set on html/body. Individual containers handle
+     their own overflow below. */
 }
 button {
   font-family: inherit;
@@ -303,12 +305,15 @@ input:focus, select:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+  overflow-x: auto;                    /* scroll container on narrow screens  */
+  -webkit-overflow-scrolling: touch;   /* momentum scroll on iOS Safari       */
 }
 .calendar-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(44px, 1fr));  /* min 44px per day  */
   gap: 4px;
   margin-bottom: 8px;
+  min-width: 308px;                    /* 7 × 44px — never narrower than this */
 }
 .calendar-weekday {
   font-size: 11px;
@@ -320,8 +325,9 @@ input:focus, select:focus { border-color: var(--accent); }
 }
 .calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(44px, 1fr));
   gap: 4px;
+  min-width: 308px;
 }
 .cal-cell {
   aspect-ratio: 1;
@@ -609,12 +615,15 @@ input:focus, select:focus { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px;
+  overflow-x: auto;                    /* scroll container on narrow screens  */
+  -webkit-overflow-scrolling: touch;   /* momentum scroll on iOS Safari       */
 }
 .cal2-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(70px, 1fr));  /* min 70px per day  */
   gap: 4px;
   margin-bottom: 6px;
+  min-width: 490px;                    /* 7 × 70px — never narrower than this */
 }
 .cal2-weekday {
   font-size: 11px;
@@ -626,7 +635,8 @@ input:focus, select:focus { border-color: var(--accent); }
 }
 .cal2-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(70px, 1fr));
+  min-width: 490px;
   /* Uniform row height — every cell in the calendar is exactly this tall,
      so rows don't snap to the tallest cell (which made cells with holiday
      names + avoid dots stretch the whole row taller than empty-content rows).
