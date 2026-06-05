@@ -28,11 +28,17 @@ export async function lookupAuthCode(code) {
 /**
  * Write the current user's session doc, mapping their Firebase UID to fellow info.
  * Called immediately after successful auth code lookup.
+ *
+ * `code` is the login code the user typed. The security rules re-verify the
+ * written role/fellowNumber against auth_codes/{code} server-side, so a client
+ * cannot forge a master session. It is stored only in the user's own session
+ * doc (readable solely by them).
  */
-export async function writeUserSession(uid, fellowNumber, role) {
+export async function writeUserSession(uid, fellowNumber, role, code) {
   await setDoc(doc(db, "user_sessions", uid), {
     fellowNumber,
     role,
+    code,
     lastLoginAt: serverTimestamp(),
   });
 }
@@ -285,11 +291,6 @@ export async function commitShiftChanges(monthKey, pending) {
       }
     }
 
-    // [DIAG] Trace what the transaction reads + writes.
-    console.log("[TX] pending applied:", JSON.stringify(pending));
-    console.log("[TX] oldShifts (from server):", JSON.stringify(oldShifts));
-    console.log("[TX] newShifts (about to write):", JSON.stringify(newShifts));
-
     // ---- WRITE PHASE ----
     // We need to fully REPLACE the shifts map (not merge), because deleting
     // a cell must remove the key — Firestore's set+merge deep-merges nested
@@ -301,12 +302,14 @@ export async function commitShiftChanges(monthKey, pending) {
     tx.set(shiftRef, newDoc);
 
     // Recompute byMonth[monthKey] for every fellow from the authoritative
-    // post-edit shifts state. Costs 8 dotted-path updates per commit.
+    // post-edit shifts state. Use set+merge with a nested object (rather than
+    // a dotted-path update) so the write also creates the shift_counts doc if
+    // it doesn't exist yet — tx.update would throw on a missing doc.
     for (let fn = 1; fn <= 8; fn++) {
       const counts = recomputeMonthCountFromShifts(newShifts, fn, holidayDates);
-      tx.update(doc(db, "shift_counts", String(fn)), {
-        [`byMonth.${monthKey}`]: counts,
-      });
+      tx.set(doc(db, "shift_counts", String(fn)), {
+        byMonth: { [monthKey]: counts },
+      }, { merge: true });
     }
   });
 

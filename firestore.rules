@@ -32,12 +32,14 @@ service cloud.firestore {
 
     // -------------------------------------------------------------------------
     // auth_codes/{code}
-    // Login lookup table. Read by any signed-in user (needed during login).
-    // No client writes ever — only the seed script (run as anonymous before
-    // collection exists) can write, and after seeding we lock it.
+    // Login lookup table. A signed-in user may GET a single code doc by id
+    // (needed during login — the client already knows the code it typed), but
+    // LISTING is forbidden so nobody can dump every fellow's code.
+    // No client writes ever — only the seed script (run before rules lock).
     // -------------------------------------------------------------------------
     match /auth_codes/{code} {
-      allow read: if isSignedIn();
+      allow get: if isSignedIn();
+      allow list: if false;
       allow write: if false;
     }
 
@@ -55,28 +57,26 @@ service cloud.firestore {
     // Each authenticated user writes their own session doc on login.
     // The doc maps Firebase UID → fellowNumber + role.
     // CRITICAL: the writing user must NOT be able to set their own role to
-    // 'master' unless they actually logged in with the master code. We enforce
-    // this by requiring the written role/fellowNumber to match what's in
-    // auth_codes for the code they used. But the rules don't know which code
-    // the user typed — so we require an exists-check against auth_codes
-    // matching their claimed fellowNumber.
+    // 'master' (or any fellowNumber) unless they actually logged in with the
+    // matching code. The client stores the code it used in `code`; we then
+    // GET that specific auth_codes doc and require the written role AND
+    // fellowNumber to equal what the code authorizes. A forged write claiming
+    // role='master' fails because get(auth_codes/<theirCode>).role != 'master'
+    // (and a bogus/absent code makes the get fail, denying the write).
+    // The `code` is the user's own secret and is only readable by them
+    // (read rule below restricts to the owning uid).
     // -------------------------------------------------------------------------
     match /user_sessions/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
 
       allow write: if isSignedIn()
         && request.auth.uid == uid
-        // The fellowNumber being written must correspond to an existing
-        // auth_codes entry whose fellowNumber matches what's being claimed.
-        // This alone doesn't prevent impersonation (anyone who knows another
-        // fellow's code can claim it) — but that's expected: codes ARE the
-        // password. What this prevents: a signed-in anonymous user writing
-        // a forged session claiming role='master' without going through the
-        // auth_codes lookup.
-        && request.resource.data.fellowNumber is int
-        && request.resource.data.role in ['master', 'user']
-        // Defensive: only allow these three fields, nothing else.
-        && request.resource.data.keys().hasOnly(['fellowNumber', 'role', 'lastLoginAt']);
+        && request.resource.data.role ==
+             get(/databases/$(database)/documents/auth_codes/$(request.resource.data.code)).data.role
+        && request.resource.data.fellowNumber ==
+             get(/databases/$(database)/documents/auth_codes/$(request.resource.data.code)).data.fellowNumber
+        // Defensive: only allow these fields, nothing else.
+        && request.resource.data.keys().hasOnly(['fellowNumber', 'role', 'lastLoginAt', 'code']);
     }
 
     // -------------------------------------------------------------------------

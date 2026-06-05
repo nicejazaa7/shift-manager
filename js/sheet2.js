@@ -35,7 +35,7 @@ import {
 import {
   parseYMD, daysInMonth, dayOfWeek, allDatesInMonth,
   isWeekend, findHoliday, isWeekendOrHoliday,
-  prevDate, nextDate, monthLabel, formatICT,
+  prevDate, nextDate, monthKeyOf, monthLabel, formatICT,
 } from "./utils.js";
 
 let _state = null;
@@ -49,6 +49,7 @@ let _ctx = {
   shiftDoc: null,          // { premiered, shifts: { dateStr: fellowNum } }
   pending: {},             // { dateStr: fellowNum | null }
   counts: {},              // shift_counts keyed by String(fellowNumber)
+  boundary: {},            // { adjacentBoundaryDateStr: fellowNum } from neighbor months
   validationErrors: new Set(),  // dateStrs flagged at the most recent save attempt
 };
 
@@ -84,16 +85,18 @@ async function renderSheet2(monthKey) {
   _container.innerHTML = `<div class="empty-state">Loading…</div>`;
 
   try {
-    const [avoidDoc, holidays, shiftDoc, counts] = await Promise.all([
+    const [avoidDoc, holidays, shiftDoc, counts, boundary] = await Promise.all([
       fetchAvoidRequests(monthKey),
       fetchHolidays(monthKey),
       fetchShiftTable(monthKey),
       fetchAllShiftCounts(),
+      fetchBoundaryAssignments(monthKey),
     ]);
     _ctx.avoidDoc = avoidDoc;
     _ctx.holidays = holidays;
     _ctx.shiftDoc = shiftDoc;
     _ctx.counts = counts;
+    _ctx.boundary = boundary;
   } catch (err) {
     console.error("Sheet2 load failed:", err);
     _container.innerHTML = `<div class="empty-state">Failed to load. Check console.</div>`;
@@ -131,10 +134,6 @@ async function renderSheet2(monthKey) {
   // re-render — that would blow away the master's in-progress overlay.
   _unsubShiftTable = subscribeShiftTable(monthKey, (newData) => {
     if (!newData) return;
-    // [DIAG] Trace every snapshot. If a stale snapshot overwrites _ctx.shiftDoc
-    // during/after a save, that would explain the cell-reverts-on-save bug.
-    console.log("[SUB] snapshot fired. newData.shifts:", JSON.stringify(newData.shifts),
-      "pending.size=", Object.keys(_ctx.pending).length);
     _ctx.shiftDoc = newData;
     if (Object.keys(_ctx.pending).length === 0) {
       renderFullLayout();
@@ -394,11 +393,6 @@ function onCellChange(dateStr, newFellowNum) {
   } else {
     _ctx.pending[dateStr] = newFellowNum;
   }
-  // [DIAG] Trace every dropdown change. Remove once Bug 1 is fixed.
-  console.log("[CELL]", dateStr,
-    "newVal=", newFellowNum,
-    "savedVal=", savedVal,
-    "→ pending now:", JSON.stringify(_ctx.pending));
 
   // Clear stale validation flags adjacent to the change. If the user is
   // fixing one half of a consecutive-day violation, both flagged cells
@@ -532,6 +526,10 @@ function onDiscard() {
 // Returns a Set of dateStrs (within the current month) that violate ≥ 1 rule.
 function validateMerged() {
   const merged = mergedShifts();
+  // lookup = this month's merged view + the single boundary day from each
+  // adjacent month, so the consecutive-day check sees across month seams
+  // (e.g. Jul 31 ↔ Aug 1) without loading the neighbors' full schedules.
+  const lookup = { ...merged, ...(_ctx.boundary || {}) };
   const avoid = (_ctx.avoidDoc && _ctx.avoidDoc.requests) || {};
   const { year, month } = parseYMD(_ctx.monthKey + "-01");
   const allDates = allDatesInMonth(year, month);
@@ -541,12 +539,12 @@ function validateMerged() {
     const fn = merged[dateStr];
     if (fn == null) continue;
 
-    // Rule 1: consecutive-day.
-    if (merged[prevDate(dateStr)] === fn) {
+    // Rule 1: consecutive-day (neighbors may be in an adjacent month).
+    if (lookup[prevDate(dateStr)] === fn) {
       violations.add(dateStr);
       violations.add(prevDate(dateStr));
     }
-    if (merged[nextDate(dateStr)] === fn) {
+    if (lookup[nextDate(dateStr)] === fn) {
       violations.add(dateStr);
       violations.add(nextDate(dateStr));
     }
@@ -558,13 +556,39 @@ function validateMerged() {
     }
   }
 
-  // Only return violations inside the current month so the UI can highlight
-  // them. Cross-month adjacent violations (last day of prev month equals
-  // fellow on day 1 of this month) are a real concern but require a
-  // multi-month validation that we'll add later if it becomes a pain point.
+  // Only surface violations inside the current month — those are the only cells
+  // the UI can highlight. A cross-month seam conflict still flags the in-month
+  // side (e.g. a Jul 31 / Aug 1 clash flags Jul 31 while viewing July), so the
+  // master sees and can fix it from whichever month they're on.
   const inMonth = new Set();
   for (const d of violations) if (d.startsWith(_ctx.monthKey + "-")) inMonth.add(d);
   return inMonth;
+}
+
+// Fetch the single boundary assignment from each adjacent month: the last day
+// of the previous month and the first day of the next month. Returns
+// { dateStr: fellowNum } containing only the days that are actually assigned.
+// Missing/out-of-range neighbors (e.g. before Jul 2026) simply contribute
+// nothing. Used to validate the consecutive-day rule across month seams.
+async function fetchBoundaryAssignments(monthKey) {
+  // Only the master validates, so users don't need the neighbor lookups.
+  if (!isMaster()) return {};
+  const { year, month } = parseYMD(monthKey + "-01");
+  const lastDay = `${monthKey}-${String(daysInMonth(year, month)).padStart(2, "0")}`;
+  const prevBoundary = prevDate(monthKey + "-01");
+  const nextBoundary = nextDate(lastDay);
+
+  const [prevDoc, nextDoc] = await Promise.all([
+    fetchShiftTable(monthKeyOf(prevBoundary)),
+    fetchShiftTable(monthKeyOf(nextBoundary)),
+  ]);
+
+  const out = {};
+  const pv = prevDoc.shifts ? prevDoc.shifts[prevBoundary] : null;
+  const nv = nextDoc.shifts ? nextDoc.shifts[nextBoundary] : null;
+  if (pv != null) out[prevBoundary] = pv;
+  if (nv != null) out[nextBoundary] = nv;
+  return out;
 }
 
 // =============================================================================
@@ -584,12 +608,14 @@ async function onPremierToggle(isCurrentlyPremiered) {
   // unlocking the schedule).
   if (!isCurrentlyPremiered) {
     try {
-      const [freshAvoid, freshShifts] = await Promise.all([
+      const [freshAvoid, freshShifts, freshBoundary] = await Promise.all([
         fetchAvoidRequests(_ctx.monthKey),
         fetchShiftTable(_ctx.monthKey),
+        fetchBoundaryAssignments(_ctx.monthKey),
       ]);
       _ctx.avoidDoc = freshAvoid;
       _ctx.shiftDoc = freshShifts;
+      _ctx.boundary = freshBoundary;
     } catch (err) {
       console.error("Premier pre-check failed:", err);
       window.showToast("Pre-check failed. Check console.", "error");

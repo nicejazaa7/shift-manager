@@ -116,8 +116,10 @@ export async function login(code) {
   }
 
   // Step 3: write the session doc. Firestore rules verify it on the server.
+  // We pass the code so the rules can re-check role/fellowNumber against
+  // auth_codes/{code} — this is what prevents a forged 'master' session.
   try {
-    await writeUserSession(uid, fellow.fellowNumber, fellow.role);
+    await writeUserSession(uid, fellow.fellowNumber, fellow.role, trimmed);
   } catch (err) {
     console.error("Session write failed:", err);
     await signOut(auth).catch(() => {});
