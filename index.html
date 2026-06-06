@@ -265,6 +265,12 @@
         window.showToast("Save or discard pending changes before switching months.", "error", 3500);
         return;
       }
+      // Same guard for Sheet 1's unconfirmed avoid picks.
+      if (typeof window.sheet1HasPendingChanges === "function"
+          && window.sheet1HasPendingChanges()) {
+        window.showToast("Confirm or discard your avoid selections before switching months.", "error", 3500);
+        return;
+      }
       state.currentMonth = monthKey;
       document.querySelectorAll(".month-btn").forEach(b => {
         b.classList.toggle("active", b.dataset.month === monthKey);

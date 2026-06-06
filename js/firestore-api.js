@@ -173,6 +173,31 @@ export async function toggleAvoidDate(monthKey, fellowNumber, dateStr) {
   });
 }
 
+/**
+ * Replace a fellow's entire avoid-date list for a month in one write.
+ * Used by the user "select-then-confirm" flow (Sheet 1) to commit a batch of
+ * picks at once instead of one transaction per tap.
+ *
+ * Read-modify-write the whole requests map but only the caller's own slot
+ * changes — this satisfies the user-update rule (onlyMyRequestsSlotChanged)
+ * exactly like toggleAvoidDate does. Master can also use it (their write rule
+ * is unconditional).
+ *
+ * @param dates  array of "YYYY-MM-DD" strings (may be empty to clear all).
+ */
+export async function setAvoidDates(monthKey, fellowNumber, dates) {
+  const ref = doc(db, "avoid_requests", monthKey);
+  const slot = String(fellowNumber);
+
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists() ? snap.data() : { allowRequests: false, requests: {} };
+    const requests = { ...(data.requests || {}) };
+    requests[slot] = [...new Set(dates)].sort();
+    tx.set(ref, { requests }, { merge: true });
+  });
+}
+
 // =============================================================================
 // Section 5: Shift table
 // =============================================================================

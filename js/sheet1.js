@@ -1,12 +1,16 @@
 // js/sheet1.js
 // Sheet 1: Avoid Requests.
-// Master sees: allow-toggle + add-holiday button + multi-colored calendar + per-fellow avoid table.
-// User sees: read-only calendar reflecting their own marks + their own date-chip summary.
+// Everyone edits their OWN avoid dates with a select-then-confirm flow: taps
+// accumulate in a pending overlay (color box, no checkmark) and are written
+// only on Confirm (color box + checkmark). This prevents mis-taps for both
+// colleagues and the master.
+// Master additionally: allow-toggle, add-holiday, sees other fellows' colored
+// dots on the calendar, and can add/remove any colleague's dates via the table.
 
 import { isMaster, currentSession } from "./auth.js";
 import {
   fetchAvoidRequests, fetchHolidays, fetchShiftTable,
-  setAllowRequests, toggleAvoidDate,
+  setAllowRequests, toggleAvoidDate, setAvoidDates,
   addCustomHoliday, removeCustomHoliday,
 } from "./firestore-api.js";
 import {
@@ -22,6 +26,10 @@ let _ctx = {
   holidays: [],        // [{ date, name, custom }]
   shiftDoc: null,      // { premiered, ... }
   monthKey: null,
+  // User select-then-confirm overlay: { dateStr: desiredBool } where the
+  // value differs from the saved state. true = will be avoided (added),
+  // false = will be un-avoided (removed). Empty = no unsaved picks.
+  pending: {},
 };
 
 // =============================================================================
@@ -36,12 +44,21 @@ export function initSheet1({ state, getCurrentMonth }) {
     const monthKey = ev.detail.monthKey || getCurrentMonth();
     await renderSheet1(monthKey);
   });
+
+  // Exposed for the month-switch guard in index.html — blocks navigation while
+  // there are unconfirmed avoid picks (master or colleague) so taps are never
+  // silently lost.
+  window.sheet1HasPendingChanges = () =>
+    Object.keys(_ctx.pending).length > 0;
 }
 
 // =============================================================================
 // Top-level render
 // =============================================================================
 async function renderSheet1(monthKey) {
+  // Reset unconfirmed picks when the month actually changes; preserve them
+  // across tab switches on the same month.
+  if (_ctx.monthKey !== monthKey) _ctx.pending = {};
   _ctx.monthKey = monthKey;
   _container.innerHTML = `<div class="empty-state">Loading…</div>`;
 
@@ -63,9 +80,13 @@ async function renderSheet1(monthKey) {
   const master = isMaster();
   const premiered = _ctx.shiftDoc.premiered === true;
   const allow = _ctx.avoidDoc.allowRequests === true;
+  // Select-then-confirm applies to anyone choosing their OWN avoid dates —
+  // colleagues and the master alike (prevents mis-taps for both).
+  const editing = allow && !premiered;
 
   _container.innerHTML = `
     ${renderToolbar(master, allow, premiered, monthKey)}
+    ${editing ? renderAvoidConfirmBar() : ""}
     <div class="sheet1-grid">
       <div>
         ${renderCalendar(monthKey, master, allow, premiered)}
@@ -82,6 +103,7 @@ async function renderSheet1(monthKey) {
   wireCalendarEvents(master, allow, premiered);
   wireHolidayPanelEvents(master);
   wireAvoidSummaryEvents(master);
+  if (editing) wireAvoidConfirmBar();
 }
 
 // =============================================================================
@@ -144,8 +166,9 @@ function renderCalendar(monthKey, master, allow, premiered) {
   const totalDays = daysInMonth(year, month);
 
   const session = currentSession();
-  const myFellowNum = session?.fellowNumber;
   const requests = _ctx.avoidDoc.requests || {};
+  const savedSet = mySavedSet();           // the logged-in person's own dates
+  const myNum = session?.fellowNumber;
 
   let cells = "";
 
@@ -165,8 +188,6 @@ function renderCalendar(monthKey, master, allow, premiered) {
       if (dates.includes(dateStr)) markedBy.push(parseInt(fnStr, 10));
     }
 
-    const myMarked = markedBy.includes(myFellowNum);
-
     const classes = [
       "cal-cell",
       weekend ? "weekend" : "",
@@ -174,28 +195,38 @@ function renderCalendar(monthKey, master, allow, premiered) {
       (premiered || !allow) ? "readonly" : "",
     ].filter(Boolean).join(" ");
 
-    // Master view: show all fellow color dots
+    // Master view: color dots for OTHER fellows. The master's own avoid is
+    // shown as the border + checkmark below (same as any fellow's own view),
+    // so exclude self from the dots to avoid double-marking.
     let dotsHtml = "";
-    if (master && markedBy.length > 0) {
-      dotsHtml = `<div class="cal-fellow-dots">` +
-        markedBy.map(fn => {
-          const f = _state.fellowsByNum[fn];
-          if (!f) return "";
-          return `<span class="cal-fellow-dot" style="background:${f.color}" title="${f.name}"></span>`;
-        }).join("") +
-        `</div>`;
+    if (master) {
+      const others = markedBy.filter(fn => fn !== myNum);
+      if (others.length > 0) {
+        dotsHtml = `<div class="cal-fellow-dots">` +
+          others.map(fn => {
+            const f = _state.fellowsByNum[fn];
+            if (!f) return "";
+            return `<span class="cal-fellow-dot" style="background:${f.color}" title="${f.name}"></span>`;
+          }).join("") +
+          `</div>`;
+      }
     }
 
-    // User view: just a checkmark if they marked it
-    let checkHtml = "";
+    // Everyone: reflect the logged-in person's own saved + unconfirmed picks.
     let borderStyle = "";
-    if (!master && myMarked) {
-      checkHtml = `<span class="cal-checkmark">✓</span>`;
+    let stateClass = "";
+    const st = userDateState(dateStr, savedSet);
+    if (st !== "none") {
+      stateClass = st === "confirmed" ? "avoid-confirmed"
+                 : st === "pending-add" ? "avoid-pending"
+                 : "avoid-removing";
       borderStyle = `border-color:${session.color}`;
     }
+    // CSS shows the checkmark only on .avoid-confirmed cells.
+    const checkHtml = `<span class="cal-checkmark">✓</span>`;
 
     cells += `
-      <div class="${classes}"
+      <div class="${classes} ${stateClass}"
            data-date="${dateStr}"
            style="${borderStyle}"
            title="${hol ? hol.name : ''}">
@@ -219,11 +250,12 @@ function renderCalendar(monthKey, master, allow, premiered) {
 }
 
 function wireCalendarEvents(master, allow, premiered) {
+  const savedSet = mySavedSet();
   const cells = _container.querySelectorAll(".cal-cell[data-date]");
   cells.forEach(cell => {
-    cell.addEventListener("click", async () => {
+    cell.addEventListener("click", () => {
       const dateStr = cell.dataset.date;
-      // Read-only conditions:
+      // Read-only conditions (apply to everyone):
       if (premiered) {
         window.showToast("Month is premiered. Edits locked.", "warning");
         return;
@@ -233,22 +265,126 @@ function wireCalendarEvents(master, allow, premiered) {
         return;
       }
 
-      const session = currentSession();
-      // For master: clicking toggles for self only (per spec). Master views see
-      // all fellows' marks but click-toggle still targets their own fellowNumber.
-      const targetFellow = session.fellowNumber;
-
-      try {
-        await toggleAvoidDate(_ctx.monthKey, targetFellow, dateStr);
-        // Re-fetch and re-render. Could be optimized to local mutation but
-        // keeping simple for correctness.
-        await renderSheet1(_ctx.monthKey);
-      } catch (err) {
-        console.error(err);
-        window.showToast("Failed to update. Check rules/permissions.", "error");
-      }
+      // Everyone edits their OWN avoid dates through the pending overlay —
+      // NOTHING is written until Confirm. We update only this cell + the bar
+      // (no full re-render), which prevents the mis-tap / scroll-jump problem.
+      toggleUserPending(dateStr, savedSet);
+      updateUserCell(dateStr, savedSet);
+      refreshConfirmBar();
     });
   });
+}
+
+// =============================================================================
+// User select-then-confirm overlay (pending picks)
+// =============================================================================
+function mySavedSet() {
+  const session = currentSession();
+  const arr = (_ctx.avoidDoc.requests || {})[String(session.fellowNumber)] || [];
+  return new Set(arr);
+}
+
+// Resolve a date's display state for the user, given their saved set.
+//   "confirmed"      saved and unchanged → color box + checkmark
+//   "pending-add"    newly picked, not yet saved → color box, no checkmark
+//   "pending-remove" was saved, marked to remove → faded/struck
+//   "none"           not avoided
+function userDateState(dateStr, savedSet) {
+  const inSaved = savedSet.has(dateStr);
+  const hasPending = Object.prototype.hasOwnProperty.call(_ctx.pending, dateStr);
+  if (!hasPending) return inSaved ? "confirmed" : "none";
+  return _ctx.pending[dateStr] ? "pending-add" : "pending-remove";
+}
+
+// The final list the user intends to save (saved ± pending).
+function myMergedDates(savedSet) {
+  const out = new Set(savedSet);
+  for (const [d, want] of Object.entries(_ctx.pending)) {
+    if (want) out.add(d); else out.delete(d);
+  }
+  return [...out].sort();
+}
+
+function toggleUserPending(dateStr, savedSet) {
+  const inSaved = savedSet.has(dateStr);
+  const hasPending = Object.prototype.hasOwnProperty.call(_ctx.pending, dateStr);
+  const cur = hasPending ? _ctx.pending[dateStr] : inSaved;
+  const want = !cur;
+  // Only store the value if it actually differs from saved; otherwise drop it
+  // so "tap then tap back" leaves no phantom pending entry.
+  if (want === inSaved) delete _ctx.pending[dateStr];
+  else _ctx.pending[dateStr] = want;
+}
+
+function updateUserCell(dateStr, savedSet) {
+  const cell = _container.querySelector(`.cal-cell[data-date="${dateStr}"]`);
+  if (!cell) return;
+  const session = currentSession();
+  cell.classList.remove("avoid-confirmed", "avoid-pending", "avoid-removing");
+  const st = userDateState(dateStr, savedSet);
+  if (st === "confirmed")        { cell.classList.add("avoid-confirmed"); cell.style.borderColor = session.color; }
+  else if (st === "pending-add") { cell.classList.add("avoid-pending");   cell.style.borderColor = session.color; }
+  else if (st === "pending-remove") { cell.classList.add("avoid-removing"); cell.style.borderColor = session.color; }
+  else { cell.style.borderColor = ""; }
+}
+
+// =============================================================================
+// Confirm bar (sticky, top) — Confirm / Discard pending avoid picks
+// =============================================================================
+function renderAvoidConfirmBar() {
+  return `
+    <div class="avoid-confirm-bar" id="avoidConfirmBar">
+      <span class="avoid-warn" id="avoidWarn"></span>
+      <div class="avoid-bar-actions">
+        <button id="avoidDiscardBtn" class="discard-btn" disabled>Discard</button>
+        <button id="avoidConfirmBtn" class="save-btn" disabled>Confirm</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireAvoidConfirmBar() {
+  const confirmBtn = _container.querySelector("#avoidConfirmBtn");
+  const discardBtn = _container.querySelector("#avoidDiscardBtn");
+  if (confirmBtn) confirmBtn.addEventListener("click", onConfirmAvoid);
+  if (discardBtn) discardBtn.addEventListener("click", onDiscardAvoid);
+  refreshConfirmBar();
+}
+
+function refreshConfirmBar() {
+  const bar = _container.querySelector("#avoidConfirmBar");
+  if (!bar) return;
+  const n = Object.keys(_ctx.pending).length;
+  bar.classList.toggle("has-pending", n > 0);
+  bar.querySelector("#avoidWarn").textContent = n > 0
+    ? `${n} unsaved change${n === 1 ? "" : "s"} — tap Confirm to save them`
+    : "Tap the dates you want to avoid, then tap Confirm.";
+  bar.querySelector("#avoidConfirmBtn").disabled = n === 0;
+  bar.querySelector("#avoidDiscardBtn").disabled = n === 0;
+}
+
+async function onConfirmAvoid() {
+  if (Object.keys(_ctx.pending).length === 0) return;
+  const session = currentSession();
+  const merged = myMergedDates(mySavedSet());
+  const confirmBtn = _container.querySelector("#avoidConfirmBtn");
+  if (confirmBtn) confirmBtn.disabled = true;
+  try {
+    await setAvoidDates(_ctx.monthKey, session.fellowNumber, merged);
+    _ctx.pending = {};
+    window.showToast("Avoid dates saved.", "success");
+    await renderSheet1(_ctx.monthKey);
+  } catch (err) {
+    console.error(err);
+    window.showToast("Failed to save. Check console.", "error", 4000);
+    if (confirmBtn) confirmBtn.disabled = false;
+  }
+}
+
+function onDiscardAvoid() {
+  if (Object.keys(_ctx.pending).length === 0) return;
+  _ctx.pending = {};
+  renderSheet1(_ctx.monthKey);
 }
 
 // =============================================================================
@@ -382,20 +518,16 @@ function renderAvoidSummary(master) {
       </div>
     `;
   } else {
-    // User: their own date chips with click-to-remove
-    const session = currentSession();
-    const myDates = (_ctx.avoidDoc.requests || {})[String(session.fellowNumber)] || [];
+    // User: read-only glance-list of what WILL be saved (saved ± pending).
+    // Editing happens on the calendar; removal is tap-to-mark then Confirm.
+    const merged = myMergedDates(mySavedSet());
     return `
       <div class="avoid-summary">
         <h3>My Avoid Dates — ${monthLabel(_ctx.monthKey)}</h3>
-        <div class="date-chips" id="myDateChips">
-          ${myDates.length === 0
+        <div class="date-chips">
+          ${merged.length === 0
             ? `<span class="empty-state">No dates selected.</span>`
-            : myDates.map(d => `
-                <span class="date-chip" data-date="${d}">
-                  ${escapeHtml(dateChipLabel(d))} <span class="x">×</span>
-                </span>
-              `).join("")}
+            : merged.map(d => `<span class="date-chip static">${escapeHtml(dateChipLabel(d))}</span>`).join("")}
         </div>
       </div>
     `;
@@ -403,28 +535,9 @@ function renderAvoidSummary(master) {
 }
 
 function wireAvoidSummaryEvents(master) {
-  if (master) {
-    wireMasterAvoidSummary();
-    return;
-  }
-  const allow = _ctx.avoidDoc.allowRequests === true;
-  const premiered = _ctx.shiftDoc.premiered === true;
-  if (premiered || !allow) return;
-
-  const session = currentSession();
-  const chips = _container.querySelectorAll("#myDateChips .date-chip");
-  chips.forEach(chip => {
-    chip.addEventListener("click", async () => {
-      const dateStr = chip.dataset.date;
-      try {
-        await toggleAvoidDate(_ctx.monthKey, session.fellowNumber, dateStr);
-        await renderSheet1(_ctx.monthKey);
-      } catch (err) {
-        console.error(err);
-        window.showToast("Failed to update.", "error");
-      }
-    });
-  });
+  // Master keeps add/remove controls on colleagues' rows. The user summary is
+  // now display-only — colleagues edit on the calendar via the confirm bar.
+  if (master) wireMasterAvoidSummary();
 }
 
 // Master-only: remove a colleague's avoid date (× on a chip) or add one

@@ -493,6 +493,42 @@ input:focus, select:focus { border-color: var(--accent); }
   color: white;
 }
 
+/* Avoid-request confirm bar (user select-then-confirm flow) */
+.avoid-confirm-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.avoid-confirm-bar.has-pending {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: var(--warning);
+}
+.avoid-warn { font-size: 13px; color: var(--text); font-weight: 500; }
+.avoid-confirm-bar.has-pending .avoid-warn { color: var(--warning); }
+.avoid-bar-actions { display: flex; gap: 8px; }
+
+/* User calendar: pending vs confirmed avoid states */
+.cal-cell .cal-checkmark { display: none; }
+.cal-cell.avoid-confirmed .cal-checkmark { display: block; }
+.cal-cell.avoid-pending { border-style: dashed; }
+.cal-cell.avoid-removing { opacity: 0.5; }
+.cal-cell.avoid-removing .cal-date { text-decoration: line-through; }
+
+/* Read-only chips in the user's "My Avoid Dates" glance-list */
+.date-chip.static { cursor: default; }
+.date-chip.static:hover { background: var(--surface-2); color: var(--text); }
+.date-chip.static .x { display: none; }
+
 /* Master avoid-summary controls (remove × on chips + add-date button) */
 .avoid-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .avoid-add-btn {
