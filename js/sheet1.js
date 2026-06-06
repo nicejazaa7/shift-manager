@@ -349,16 +349,26 @@ function openAddHolidayModal() {
 // =============================================================================
 function renderAvoidSummary(master) {
   if (master) {
-    // Table grouped by fellow
+    // When premiered the month is frozen — chips are read-only (no ×, no add).
+    const premiered = _ctx.shiftDoc.premiered === true;
+
+    // Table grouped by fellow. When editable, each chip carries a × to remove
+    // that fellow's date, and each row gets a "+ Add date" button.
     const rows = _state.fellows.map(f => {
       const myDates = (_ctx.avoidDoc.requests || {})[String(f.fellowNumber)] || [];
       const chips = myDates.length === 0
         ? `<span class="empty-state">—</span>`
-        : myDates.map(d => `<span class="date-chip">${escapeHtml(dateChipLabel(d))}</span>`).join(" ");
+        : myDates.map(d => premiered
+            ? `<span class="date-chip">${escapeHtml(dateChipLabel(d))}</span>`
+            : `<span class="date-chip removable" data-fellow="${f.fellowNumber}" data-date="${d}">${escapeHtml(dateChipLabel(d))} <span class="x">×</span></span>`
+          ).join(" ");
+      const addBtn = premiered
+        ? ""
+        : `<button class="avoid-add-btn" data-fellow="${f.fellowNumber}">+ Add date</button>`;
       return `
         <tr>
           <td><span class="fellow-chip" style="background:${f.color}">#${f.fellowNumber} ${escapeHtml(f.name)}</span></td>
-          <td>${chips}</td>
+          <td><div class="avoid-cell">${chips} ${addBtn}</div></td>
         </tr>
       `;
     }).join("");
@@ -393,7 +403,10 @@ function renderAvoidSummary(master) {
 }
 
 function wireAvoidSummaryEvents(master) {
-  if (master) return;
+  if (master) {
+    wireMasterAvoidSummary();
+    return;
+  }
   const allow = _ctx.avoidDoc.allowRequests === true;
   const premiered = _ctx.shiftDoc.premiered === true;
   if (premiered || !allow) return;
@@ -411,6 +424,101 @@ function wireAvoidSummaryEvents(master) {
         window.showToast("Failed to update.", "error");
       }
     });
+  });
+}
+
+// Master-only: remove a colleague's avoid date (× on a chip) or add one
+// (+ Add date per fellow). Both confirm before writing. Disabled when the
+// month is premiered, since the schedule is frozen for everyone then.
+function wireMasterAvoidSummary() {
+  if (_ctx.shiftDoc.premiered === true) return;
+
+  // Remove — × on a colleague's chip.
+  _container.querySelectorAll(".avoid-summary .date-chip.removable").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const fellowNumber = parseInt(chip.dataset.fellow, 10);
+      const dateStr = chip.dataset.date;
+      const f = _state.fellowsByNum[fellowNumber];
+      const who = f ? f.name : `Fellow ${fellowNumber}`;
+      window.openModal(`
+        <h2>Remove avoid date</h2>
+        <p style="color:var(--text-dim); margin-bottom:16px;">
+          You are about to remove <strong>${escapeHtml(who)}</strong>'s avoid date
+          (<strong>${escapeHtml(dateChipLabel(dateStr))}</strong>). Confirm this action.
+        </p>
+        <div class="modal-actions">
+          <button class="btn-secondary" onclick="window.closeModal()">No</button>
+          <button class="btn-danger" id="confirmRemoveAvoidBtn">Yes</button>
+        </div>
+      `);
+      document.getElementById("confirmRemoveAvoidBtn").addEventListener("click", async () => {
+        try {
+          await toggleAvoidDate(_ctx.monthKey, fellowNumber, dateStr);
+          window.closeModal();
+          window.showToast("Avoid date removed.", "success");
+          await renderSheet1(_ctx.monthKey);
+        } catch (err) {
+          console.error(err);
+          window.showToast("Failed to remove. Check console.", "error");
+        }
+      });
+    });
+  });
+
+  // Add — + Add date per fellow row.
+  _container.querySelectorAll(".avoid-summary .avoid-add-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      openMasterAddAvoidModal(parseInt(btn.dataset.fellow, 10));
+    });
+  });
+}
+
+function openMasterAddAvoidModal(fellowNumber) {
+  const monthKey = _ctx.monthKey;
+  const { year, month } = parseYMD(monthKey + "-01");
+  const total = daysInMonth(year, month);
+  const f = _state.fellowsByNum[fellowNumber];
+  const who = f ? f.name : `Fellow ${fellowNumber}`;
+
+  const dayOptions = [];
+  for (let d = 1; d <= total; d++) {
+    dayOptions.push(`<option value="${String(d).padStart(2, "0")}">${d}</option>`);
+  }
+
+  window.openModal(`
+    <h2>Add avoid date — ${escapeHtml(who)}</h2>
+    <div class="modal-row">
+      <label>Day</label>
+      <select id="addAvoidDay">${dayOptions.join("")}</select>
+    </div>
+    <p style="color:var(--text-dim); margin-bottom:16px;">
+      Add an avoid date for this colleague. Confirm this action.
+    </p>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="window.closeModal()">No</button>
+      <button class="btn-primary" id="confirmAddAvoidBtn">Yes</button>
+    </div>
+  `);
+
+  document.getElementById("confirmAddAvoidBtn").addEventListener("click", async () => {
+    const day = document.getElementById("addAvoidDay").value;
+    const dateStr = `${monthKey}-${day}`;
+    const existing = (_ctx.avoidDoc.requests || {})[String(fellowNumber)] || [];
+    if (existing.includes(dateStr)) {
+      // toggleAvoidDate would REMOVE an existing date — guard against that so
+      // "add" never silently deletes.
+      window.showToast("Already an avoid date for this colleague.", "warning");
+      return;
+    }
+    try {
+      await toggleAvoidDate(monthKey, fellowNumber, dateStr);
+      window.closeModal();
+      window.showToast("Avoid date added.", "success");
+      await renderSheet1(monthKey);
+    } catch (err) {
+      console.error(err);
+      window.showToast("Failed to add. Check console.", "error");
+    }
   });
 }
 
