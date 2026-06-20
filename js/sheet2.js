@@ -25,7 +25,7 @@
 //      to edit dates near day 31.
 // Batching writes severs the UX loop from network latency entirely.
 
-import { isMaster } from "./auth.js";
+import { isMaster, currentSession } from "./auth.js";
 import {
   fetchAvoidRequests, fetchHolidays, fetchShiftTable,
   fetchAllShiftCounts, subscribeShiftTable,
@@ -37,6 +37,24 @@ import {
   isWeekend, findHoliday, isWeekendOrHoliday,
   prevDate, nextDate, monthKeyOf, monthLabel, formatICT,
 } from "./utils.js";
+
+// -----------------------------------------------------------------------------
+// Export reference data (for the master-only "Export" roster file).
+// The web app only stores nicknames; the faculty roster uses Thai real first
+// names and a fixed senior↔junior "couple" (Line A = assigned fellow, Line B =
+// the partner, which is never counted as quota). These three constants come
+// from the secretary's spreadsheet (ตารางเวร Fellow …) and are not in Firestore.
+// -----------------------------------------------------------------------------
+const EXPORT_REAL_NAME = {
+  1: "อัศนี", 2: "ธนทัต", 3: "พชร", 4: "ธนโชค",
+  5: "กษิดิศ", 6: "ทวีสิทธิ์", 7: "บุญยกร", 8: "วรรณวรงค์",
+};
+const EXPORT_COUPLE = { 1: 5, 2: 6, 3: 7, 4: 8, 5: 1, 6: 2, 7: 3, 8: 4 };
+const THAI_MONTHS = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+];
+const EXPORT_TITLE = "ตารางเวรแพทย์ประจำบ้านต่อยอดโรคหัวใจและหลอดเลือด";
 
 let _state = null;
 let _container = null;
@@ -180,8 +198,10 @@ function renderToolbar() {
   if (premiered) {
     tb.innerHTML = `
       <span class="premier-status">Premiered: <strong>${premieredAtICT || '—'}</strong></span>
+      <button id="exportBtn" class="export-btn">Export</button>
       <button id="premierBtn" class="premier-btn amber">UNPREMIER</button>
     `;
+    document.getElementById("exportBtn").addEventListener("click", exportRoster);
     document.getElementById("premierBtn").addEventListener("click", () => onPremierToggle(true));
     return;
   }
@@ -223,9 +243,9 @@ function renderCountsPanel() {
     const c = computeMonthCountFromShifts(merged, f.fellowNumber);
     return `
       <tr>
-        <td><span class="fellow-chip" style="background:${f.color}">${escapeHtml(f.name)}</span></td>
-        <td class="col-wd">${c.weekday}</td>
+        <td><span class="fellow-chip" style="background:${f.color}">${f.fellowNumber}. ${escapeHtml(f.name)}</span></td>
         <td class="col-wh">${c.weekendHoliday}</td>
+        <td class="col-wd">${c.weekday}</td>
       </tr>
     `;
   }).join("");
@@ -234,9 +254,9 @@ function renderCountsPanel() {
     const c = computeLifetimeFromCountsAndMerged(f.fellowNumber, merged);
     return `
       <tr>
-        <td><span class="fellow-chip" style="background:${f.color}">${escapeHtml(f.name)}</span></td>
-        <td class="col-wd">${c.weekday}</td>
+        <td><span class="fellow-chip" style="background:${f.color}">${f.fellowNumber}. ${escapeHtml(f.name)}</span></td>
         <td class="col-wh">${c.weekendHoliday}</td>
+        <td class="col-wd">${c.weekday}</td>
       </tr>
     `;
   }).join("");
@@ -245,13 +265,13 @@ function renderCountsPanel() {
     <div class="count-panel">
       <h4>This month — ${monthLabel(monthKey)}</h4>
       <table class="count-table">
-        <thead><tr><th></th><th class="col-wd">WD</th><th class="col-wh">WE/H</th></tr></thead>
+        <thead><tr><th></th><th class="col-wh">WE/H</th><th class="col-wd">WD</th></tr></thead>
         <tbody>${monthRows}</tbody>
       </table>
       <div class="count-divider"></div>
       <h4>Cumulative since Jul 2026</h4>
       <table class="count-table">
-        <thead><tr><th></th><th class="col-wd">WD</th><th class="col-wh">WE/H</th></tr></thead>
+        <thead><tr><th></th><th class="col-wh">WE/H</th><th class="col-wd">WD</th></tr></thead>
         <tbody>${lifetimeRows}</tbody>
       </table>
     </div>
@@ -316,9 +336,15 @@ function renderCalendar() {
 
 function renderAvoidDots(dateStr) {
   const requests = (_ctx.avoidDoc && _ctx.avoidDoc.requests) || {};
+  // Master sees every fellow's avoid dots. A regular user sees ONLY their own
+  // avoid dates — they should not be able to see colleagues' requests.
+  const master = isMaster();
+  const ownNum = master ? null : (currentSession() && currentSession().fellowNumber);
   const markedBy = [];
   for (const [fnStr, dates] of Object.entries(requests)) {
-    if (dates.includes(dateStr)) markedBy.push(parseInt(fnStr, 10));
+    const fn = parseInt(fnStr, 10);
+    if (!master && fn !== ownNum) continue;
+    if (dates.includes(dateStr)) markedBy.push(fn);
   }
   return markedBy.map(fn => {
     const f = _state.fellowsByNum[fn];
@@ -692,6 +718,71 @@ async function onPremierToggle(isCurrentlyPremiered) {
       window.showToast("Failed. Check console.", "error");
     }
   });
+}
+
+// =============================================================================
+// Export — master-only roster file for the faculty secretary
+// =============================================================================
+// Builds an .xlsx spreadsheet mirroring the secretary's sheet (ตารางเวร Fellow …):
+// a merged title row, a Thai month line with the Buddhist year, then one row
+// per day with Line A (real first name of the assigned fellow) and Line B (real
+// first name of the fixed couple partner). A real spreadsheet — not an HTML
+// page — so the secretary can open it in Excel / Google Sheets / Numbers (incl.
+// from Line on her phone) and copy the names straight into her master table.
+// SheetJS is imported on demand from CDN (same pattern as the Firebase CDN
+// modules), so it only loads when Export is clicked. Only reachable from the
+// premiered toolbar, so it always reflects the locked schedule.
+async function exportRoster() {
+  const monthKey = _ctx.monthKey;
+  const { year, month } = parseYMD(monthKey + "-01");
+  const total = daysInMonth(year, month);
+  const shifts = (_ctx.shiftDoc && _ctx.shiftDoc.shifts) || {};
+  const monthName = `${THAI_MONTHS[month - 1]} ${year + 543}`;
+
+  const btn = document.getElementById("exportBtn");
+  if (btn) btn.disabled = true;
+
+  let XLSX;
+  try {
+    XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  } catch (err) {
+    console.error("Export library load failed:", err);
+    window.showToast("Couldn't load the export library (check internet). Try again.", "error", 4000);
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  // Array-of-arrays mirroring the secretary's layout exactly.
+  const aoa = [
+    [EXPORT_TITLE, null, null],
+    [`ประจำเดือน${monthName}`, null, null],
+    [null, "สาย A", "สาย B"],
+  ];
+  for (let d = 1; d <= total; d++) {
+    const dateStr = `${monthKey}-${String(d).padStart(2, "0")}`;
+    const fn = shifts[dateStr];
+    const lineA = fn != null ? (EXPORT_REAL_NAME[fn] || "") : "";
+    const lineB = fn != null ? (EXPORT_REAL_NAME[EXPORT_COUPLE[fn]] || "") : "";
+    aoa.push([d, lineA, lineB]);
+  }
+
+  try {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    // Merge the two title rows across the three columns (A1:C1, A2:C2).
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 2 } },
+    ];
+    ws["!cols"] = [{ wch: 6 }, { wch: 16 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "ตารางเวร");
+    XLSX.writeFile(wb, `ตารางเวร Fellow ${monthName}.xlsx`);
+  } catch (err) {
+    console.error("Export build/write failed:", err);
+    window.showToast("Export failed. Check console.", "error", 4000);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // =============================================================================
